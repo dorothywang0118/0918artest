@@ -31,8 +31,9 @@
       <div><b>玩法：</b>移動在店內（15 公尺範圍）尋找 5 隻隱藏的小狐狸。靠近到 1 公尺且位在鏡頭前方會出現提示。</div>
     </div>
     <div id="foot">
-      <button id="enterARBtn">啟動相機 / 進入 AR</button>
-      <div class="chip" id="compatMsg">若按鈕無法使用：請以 HTTPS 網址（或 localhost）在行動裝置的 Chrome/Edge/Safari 開啟</div>
+      <button id="enterARBtn">啟動 AR（可選）</button>
+      <div class="chip" id="compatMsg">頁面已自動請求相機權限並開啟鏡頭；若失敗會顯示錯誤。</div>
+    </div>
     </div>
       <div class="chip">範例模型：fox_stand.glb / fox_sleep.glb</div>
     </div>
@@ -53,6 +54,31 @@
     const videoEl = document.getElementById('cameraPreview');
     const enterBtn = document.getElementById('enterARBtn');
     const compatMsg = document.getElementById('compatMsg');
+
+    let previewStream = null;
+
+    async function startCamera() {
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new Error('此瀏覽器不支援相機 API (getUserMedia)。');
+        }
+        // 若已存在串流，先關閉
+        if (previewStream) {
+          previewStream.getTracks().forEach(t => t.stop());
+          previewStream = null;
+        }
+        const constraints = { video: { facingMode: { ideal: 'environment' } }, audio: false };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        previewStream = stream;
+        videoEl.srcObject = stream;
+        // 某些瀏覽器需要顯式 play()
+        await videoEl.play().catch(() => {});
+        compatMsg.textContent = '鏡頭已開啟。若要進入 AR，請點上方按鈕。';
+      } catch (err) {
+        showError('相機啟動失敗：' + (err?.name ? `${err.name} — ` : '') + (err?.message || err));
+        compatMsg.textContent = '相機啟動失敗，請確認 HTTPS、權限與瀏覽器版本。';
+      }
+    }
     const enterBtn = document.getElementById('enterARBtn');
     const compatMsg = document.getElementById('compatMsg'); // for dom-overlay
     const hintEl = document.getElementById('hint');
@@ -128,22 +154,13 @@
 
     async function init() {
       if (!window.isSecureContext) {
-        showError('需要以 HTTPS 或 localhost 開啟，否則相機/AR 可能無法使用。');
+        showError('建議以 HTTPS 或 localhost 開啟，以確保相機可用。');
       }
 
-      // 先嘗試開啟相機作為「背景預覽」，即使沒有進入 AR 也能看到畫面
-      try {
-        if (navigator.mediaDevices?.getUserMedia) {
-          const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
-          videoEl.srcObject = stream;
-        } else {
-          compatMsg.textContent = '此瀏覽器不支援 navigator.mediaDevices.getUserMedia。';
-        }
-      } catch (e) {
-        showError('相機預覽開啟失敗：' + (e?.message || e));
-      }
+      // 一進網頁就請求相機權限並開啟鏡頭
+      await startCamera();
 
-      // three.js renderer
+      // three.js renderer & AR 準備（選用）
       renderer.setAnimationLoop(onXRFrame);
       window.addEventListener('resize', onResize);
 
