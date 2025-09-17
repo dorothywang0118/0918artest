@@ -13,6 +13,9 @@
     .chip { pointer-events: auto; user-select: none; padding: 8px 12px; color: #fff; background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.15); border-radius: 999px; font-size: 14px; }
     #hint { position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%); padding: 12px 16px; background: rgba(255,255,255,.95); color: #111; border-radius: 12px; font-weight: 700; font-size: 18px; display: none; box-shadow: 0 8px 30px rgba(0,0,0,.35); }
     #error { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); padding: 10px 12px; background: #ff4d4f; color: #fff; border-radius: 10px; display: none; font-weight: 600; }
+    #enterARBtn { pointer-events: auto; user-select: none; padding: 10px 14px; color: #111; background: #a0e9ff; border: none; border-radius: 999px; font-size: 16px; font-weight: 700; box-shadow: 0 6px 20px rgba(0,0,0,.25); }
+    #enterARBtn[disabled] { opacity: .5; }
+    .hidden { display: none !important; }
   </style>
 </head>
 <body>
@@ -21,7 +24,9 @@
       <div><b>玩法：</b>移動在店內（15 公尺範圍）尋找 5 隻隱藏的小狐狸。靠近到 1 公尺且位在鏡頭前方會出現提示。</div>
     </div>
     <div id="foot">
-      <div class="chip">允許相機權限以開啟 AR</div>
+      <button id="enterARBtn">啟動相機 / 進入 AR</button>
+      <div class="chip" id="compatMsg">若按鈕無法使用：請以 HTTPS 網址（或 localhost）在行動裝置的 Chrome/Edge/Safari 開啟</div>
+    </div>
       <div class="chip">範例模型：fox_stand.glb / fox_sleep.glb</div>
     </div>
   </div>
@@ -37,7 +42,9 @@
     import { RGBELoader } from 'https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/loaders/RGBELoader.js';
     import { clone as SkeletonClone } from 'https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/utils/SkeletonUtils.js';
 
-    const overlayRoot = document.body; // for dom-overlay
+    const overlayRoot = document.body;
+    const enterBtn = document.getElementById('enterARBtn');
+    const compatMsg = document.getElementById('compatMsg'); // for dom-overlay
     const hintEl = document.getElementById('hint');
     const errorEl = document.getElementById('error');
 
@@ -120,10 +127,41 @@
     let placed = false;
 
     async function init() {
-      if (!navigator.xr) {
-        showError('此裝置/瀏覽器未支援 WebXR AR。請使用具備 AR 的行動裝置與 Chrome/Edge/Safari。');
-        return;
+      try {
+        await loadFoxBase();
+      } catch (e) {
+        showError(e.message || '模型載入失敗，請確認檔名與路徑。');
       }
+
+      // Prepare AR button but don't auto-append; we will mount it into our UI
+      let xrButton;
+      const setupARButton = () => {
+        try {
+          xrButton = ARButton.createButton(renderer, {
+            requiredFeatures: ['local-floor'],
+            optionalFeatures: ['dom-overlay','unbounded'],
+            domOverlay: { root: overlayRoot }
+          });
+          // Style & move the button into our footer
+          xrButton.style.display = 'none'; // keep hidden, we proxy via enterBtn
+          document.body.appendChild(xrButton);
+          enterBtn.disabled = false;
+        } catch (err) {
+          showError('建立 AR 按鈕失敗：' + (err?.message || err));
+          enterBtn.disabled = true;
+        }
+      };
+
+      // If WebXR available, set up AR; else fallback to camera permission test only
+      if (navigator.xr) {
+        setupARButton();
+      } else {
+        compatMsg.textContent = '此瀏覽器不支援 WebXR AR，仍可授權相機測試，但無法進入 AR。';
+      }
+
+      renderer.setAnimationLoop(onXRFrame);
+      window.addEventListener('resize', onResize);
+    }
 
       try {
         await loadFoxBase();
@@ -145,6 +183,30 @@
     function onResize(){
       renderer.setSize(window.innerWidth, window.innerHeight);
     }
+
+    // Explicit user-gesture flow to request camera permission first
+    enterBtn.addEventListener('click', async () => {
+      enterBtn.disabled = true;
+      try {
+        // 1) Ask for camera (user gesture required)
+        if (navigator.mediaDevices?.getUserMedia) {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+          // Immediately stop tracks; we only needed the permission prompt here.
+          stream.getTracks().forEach(t => t.stop());
+        }
+        // 2) If WebXR AR is available, forward to ARButton's flow
+        const btn = document.querySelector('button.webxr-ar-button');
+        if (btn) {
+          btn.click(); // triggers AR session
+        } else if (!navigator.xr) {
+          showError('已取得相機權限，但本瀏覽器不支援 WebXR AR。請改用支援的行動版 Chrome/Edge/Safari，並以 HTTPS 開啟。');
+        }
+      } catch (err) {
+        showError('取得相機權限失敗：' + (err?.message || err));
+      } finally {
+        enterBtn.disabled = false;
+      }
+    );
 
     function placeFoxesAround(startCam) {
       // origin = camera position at session start
