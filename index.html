@@ -3,108 +3,67 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <!-- Some browsers require Permission-Policy via server headers, but keep meta as hint -->
-  <meta http-equiv="Permissions-Policy" content="camera=(self), xr-spatial-tracking=(self)" />
-  <meta name="theme-color" content="#000000" />
+  <meta http-equiv="Permissions-Policy" content="camera=(self)" />
   <title>店內 AR 隱藏小狐狸</title>
   <style>
     html, body { margin: 0; padding: 0; height: 100%; background: #000; }
     #cameraPreview { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; background: #000; }
     canvas { position: fixed; inset: 0; z-index: 1; }
-    #overlay { position: fixed; inset: 0; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; }
-    #topbar { margin: env(safe-area-inset-top) 12px 0; padding: 10px 12px; background: rgba(0,0,0,.45); color: #fff; border-radius: 12px; font-family: system-ui, -apple-system, Segoe UI, Roboto, Noto Sans TC, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; backdrop-filter: blur(6px); max-width: calc(100% - 24px); }
+    #overlay { position: fixed; inset: 0; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; z-index: 2; }
+    #topbar { margin: env(safe-area-inset-top) 12px 0; padding: 10px 12px; background: rgba(0,0,0,.45); color: #fff; border-radius: 12px; font-family: system-ui, -apple-system, Segoe UI, Roboto, Noto Sans TC, Helvetica, Arial; backdrop-filter: blur(6px); max-width: calc(100% - 24px); }
     #topbar b { color: #a0e9ff; }
-    #foot { margin: 0 12px env(safe-area-inset-bottom); display: flex; gap: 8px; align-items: center; justify-content: center; flex-wrap: wrap; }
-    .chip { pointer-events: auto; user-select: none; padding: 8px 12px; color: #fff; background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.15); border-radius: 999px; font-size: 14px; }
-    #hint { position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%); padding: 12px 16px; background: rgba(255,255,255,.95); color: #111; border-radius: 12px; font-weight: 700; font-size: 18px; display: none; box-shadow: 0 8px 30px rgba(0,0,0,.35); }
-    #error { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); padding: 10px 12px; background: #ff4d4f; color: #fff; border-radius: 10px; display: none; font-weight: 600; }
-    #enterARBtn { pointer-events: auto; user-select: none; padding: 10px 14px; color: #111; background: #a0e9ff; border: none; border-radius: 999px; font-size: 16px; font-weight: 700; box-shadow: 0 6px 20px rgba(0,0,0,.25); }
-    #enterARBtn[disabled] { opacity: .5; }
-    .hidden { display: none !important; }
+    #hint { position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%); padding: 12px 16px; background: rgba(255,255,255,.95); color: #111; border-radius: 12px; font-weight: 700; font-size: 18px; display: none; box-shadow: 0 8px 30px rgba(0,0,0,.35); z-index: 3; }
+    #error { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); padding: 10px 12px; background: #ff4d4f; color: #fff; border-radius: 10px; display: none; font-weight: 600; z-index: 3; }
   </style>
 </head>
 <body>
-  <!-- Fallback camera preview when WebXR AR is unavailable/not active -->
   <video id="cameraPreview" autoplay playsinline muted></video>
   <div id="overlay">
     <div id="topbar">
       <div><b>玩法：</b>移動在店內（15 公尺範圍）尋找 5 隻隱藏的小狐狸。靠近到 1 公尺且位在鏡頭前方會出現提示。</div>
     </div>
-    <div id="foot">
-      <button id="enterARBtn">啟動 AR（可選）</button>
-      <div class="chip" id="compatMsg">頁面已自動請求相機權限並開啟鏡頭；若失敗會顯示錯誤。</div>
-    </div>
-    </div>
-      <div class="chip">範例模型：fox_stand.glb / fox_sleep.glb</div>
-    </div>
   </div>
   <div id="hint">這裡有動物的足跡</div>
   <div id="error"></div>
 
-  <!-- three.js & loaders (r165 or later) -->
   <script type="module">
     import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js';
-    import { ARButton } from 'https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/webxr/ARButton.js';
     import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/loaders/GLTFLoader.js';
     import { DRACOLoader } from 'https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/loaders/DRACOLoader.js';
-    import { RGBELoader } from 'https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/loaders/RGBELoader.js';
-    import { clone as SkeletonClone } from 'https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/utils/SkeletonUtils.js';
 
-    const overlayRoot = document.body;
     const videoEl = document.getElementById('cameraPreview');
-    const enterBtn = document.getElementById('enterARBtn');
-    const compatMsg = document.getElementById('compatMsg');
-
-    let previewStream = null;
-
-    async function startCamera() {
-      try {
-        if (!navigator.mediaDevices?.getUserMedia) {
-          throw new Error('此瀏覽器不支援相機 API (getUserMedia)。');
-        }
-        // 若已存在串流，先關閉
-        if (previewStream) {
-          previewStream.getTracks().forEach(t => t.stop());
-          previewStream = null;
-        }
-        const constraints = { video: { facingMode: { ideal: 'environment' } }, audio: false };
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        previewStream = stream;
-        videoEl.srcObject = stream;
-        // 某些瀏覽器需要顯式 play()
-        await videoEl.play().catch(() => {});
-        compatMsg.textContent = '鏡頭已開啟。若要進入 AR，請點上方按鈕。';
-      } catch (err) {
-        showError('相機啟動失敗：' + (err?.name ? `${err.name} — ` : '') + (err?.message || err));
-        compatMsg.textContent = '相機啟動失敗，請確認 HTTPS、權限與瀏覽器版本。';
-      }
-    }
-    const enterBtn = document.getElementById('enterARBtn');
-    const compatMsg = document.getElementById('compatMsg'); // for dom-overlay
     const hintEl = document.getElementById('hint');
     const errorEl = document.getElementById('error');
 
-    // Basic renderer
+    // 啟動相機預覽（頁面載入就詢問權限）
+    async function startCamera() {
+      try {
+        if (navigator.mediaDevices?.getUserMedia) {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+          videoEl.srcObject = stream;
+        } else {
+          showError('此瀏覽器不支援相機存取。');
+        }
+      } catch (e) {
+        showError('相機開啟失敗：' + (e?.message || e));
+      }
+    }
+
+    // three.js 基本設置
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.xr.enabled = true;
     document.body.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera();
 
-    // Lighting
     const hemi = new THREE.HemisphereLight(0xffffff, 0x444466, 1.0);
     scene.add(hemi);
     const dir = new THREE.DirectionalLight(0xffffff, 0.6);
     dir.position.set(1, 2, 1);
     scene.add(dir);
 
-    //（移除 HDRI 以降低行動裝置載入失敗與黑畫面風險）
-
-    const camera = new THREE.PerspectiveCamera();
-
-    // Fox asset loader
     const gltfLoader = new GLTFLoader();
     const draco = new DRACOLoader();
     draco.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/libs/draco/');
@@ -115,27 +74,25 @@
 
     async function loadFoxBase() {
       const [stand, sleep] = await Promise.all([
-        gltfLoader.loadAsync(FOX_FILES[0]).catch(e => { throw new Error('無法載入 fox_stand.glb'); }),
-        gltfLoader.loadAsync(FOX_FILES[1]).catch(e => { throw new Error('無法載入 fox_sleep.glb'); })
+        gltfLoader.loadAsync(FOX_FILES[0]),
+        gltfLoader.loadAsync(FOX_FILES[1])
       ]);
       foxBase.stand = stand.scene;
       foxBase.sleep = sleep.scene;
-      // Normalize base scale lightly if models are too big/small (tweak as needed)
       [foxBase.stand, foxBase.sleep].forEach(root => {
         root.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
         const box = new THREE.Box3().setFromObject(root);
         const size = new THREE.Vector3(); box.getSize(size);
-        const targetHeight = 0.35; // ~35cm 高的小狐狸
+        const targetHeight = 0.35;
         const s = targetHeight / Math.max(size.y, 1e-3);
         root.scale.setScalar(s);
       });
     }
 
-    // Create 5 foxes randomly within 15m radius around starting pose
-    const FOX_COUNT = 5; // 顧客要看到 5 隻
-    const FOX_RADIUS = 15; // 15 公尺內
-    const FOX_MIN_RADIUS = 2.5; // 避免一開始就貼很近
-    const foxes = []; // {mesh, position}
+    const FOX_COUNT = 5;
+    const FOX_RADIUS = 15;
+    const FOX_MIN_RADIUS = 2.5;
+    const foxes = [];
 
     function randomInRing(minR, maxR) {
       const r = Math.sqrt(Math.random() * (maxR*maxR - minR*minR) + minR*minR);
@@ -145,124 +102,20 @@
 
     function makeFoxInstance(kind = 'stand') {
       const base = kind === 'sleep' ? foxBase.sleep : foxBase.stand;
-      const root = SkeletonClone(base);
+      const root = base.clone(true);
       root.rotation.y = Math.random()*Math.PI*2;
       return root;
     }
 
     let placed = false;
 
-    async function init() {
-      if (!window.isSecureContext) {
-        showError('建議以 HTTPS 或 localhost 開啟，以確保相機可用。');
-      }
-
-      // 一進網頁就請求相機權限並開啟鏡頭
-      await startCamera();
-
-      // three.js renderer & AR 準備（選用）
-      renderer.setAnimationLoop(onXRFrame);
-      window.addEventListener('resize', onResize);
-
-      // 建立 WebXR AR 按鈕（隱藏原生，使用自製按鈕轉觸）
-      let xrButton;
-      const setupARButton = () => {
-        xrButton = ARButton.createButton(renderer, {
-          requiredFeatures: ['local-floor'],
-          optionalFeatures: ['dom-overlay','unbounded'],
-          domOverlay: { root: overlayRoot }
-        });
-        xrButton.style.display = 'none';
-        document.body.appendChild(xrButton);
-        enterBtn.disabled = false;
-      };
-
-      if ('xr' in navigator) {
-        setupARButton();
-      } else {
-        compatMsg.textContent = '此瀏覽器不支援 WebXR。將使用相機預覽模式。';
-      }
-
-      // 當 AR session 啟動/結束時，切換相機預覽可見度
-      renderer.xr.addEventListener('sessionstart', () => {
-        videoEl.style.display = 'none';
-        // place foxes at session start to ensure reference is ready
-        if (!placed) placeFoxesAround(camera);
-      });
-      renderer.xr.addEventListener('sessionend', () => {
-        videoEl.style.display = 'block';
-      });
-    }
-
-      try {
-        await loadFoxBase();
-      } catch (e) {
-        showError(e.message || '模型載入失敗，請確認檔名與路徑。');
-      }
-
-      const btn = ARButton.createButton(renderer, {
-        requiredFeatures: ['local-floor'],
-        optionalFeatures: ['dom-overlay','unbounded'],
-        domOverlay: { root: overlayRoot }
-      });
-      document.body.appendChild(btn);
-
-      renderer.setAnimationLoop(onXRFrame);
-      window.addEventListener('resize', onResize);
-    }
-
-    function onResize(){
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    }
-
-    // Explicit user-gesture flow to request camera permission first
-    enterBtn.addEventListener('click', async () => {
-      enterBtn.disabled = true;
-      try {
-        // 1) 先嘗試相機權限（有些瀏覽器需要手勢觸發）
-        if (navigator.mediaDevices?.getUserMedia) {
-          const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
-          // 若已經有預覽在播，可直接停掉這個暫時串流
-          s.getTracks().forEach(t => t.stop());
-        }
-        // 2) 啟動 WebXR AR（若可用）
-        const btn = document.querySelector('button.webxr-ar-button');
-        if (btn) {
-          btn.click();
-        } else if (!('xr' in navigator)) {
-          showError('此瀏覽器不支援 WebXR，已維持相機預覽模式。');
-        }
-      } catch (err) {
-        showError('啟動流程失敗：' + (err?.message || err));
-      } finally {
-        enterBtn.disabled = false;
-      }
-    });
-          // Immediately stop tracks; we only needed the permission prompt here.
-          stream.getTracks().forEach(t => t.stop());
-        }
-        // 2) If WebXR AR is available, forward to ARButton's flow
-        const btn = document.querySelector('button.webxr-ar-button');
-        if (btn) {
-          btn.click(); // triggers AR session
-        } else if (!navigator.xr) {
-          showError('已取得相機權限，但本瀏覽器不支援 WebXR AR。請改用支援的行動版 Chrome/Edge/Safari，並以 HTTPS 開啟。');
-        }
-      } catch (err) {
-        showError('取得相機權限失敗：' + (err?.message || err));
-      } finally {
-        enterBtn.disabled = false;
-      }
-    );
-
     function placeFoxesAround(startCam) {
-      // origin = camera position at session start
       const origin = new THREE.Vector3();
       startCam.getWorldPosition(origin);
 
       for (let i=0; i<FOX_COUNT; i++) {
         const v2 = randomInRing(FOX_MIN_RADIUS, FOX_RADIUS);
-        const pos = new THREE.Vector3(origin.x + v2.x, 0.0, origin.z + v2.y); // 放在地板 y=0
+        const pos = new THREE.Vector3(origin.x + v2.x, 0.0, origin.z + v2.y);
         const kind = Math.random() < 0.5 ? 'stand' : 'sleep';
         const fox = makeFoxInstance(kind);
         fox.position.copy(pos);
@@ -278,7 +131,6 @@
 
     function updateHintVisibility() {
       let show = false;
-      // 相機世界座標 & 前向向量
       camera.getWorldDirection(camForward).normalize();
       const camPos = camera.getWorldPosition(new THREE.Vector3());
 
@@ -286,7 +138,6 @@
         tmpVec.copy(fox.position).sub(camPos);
         const dist = tmpVec.length();
         if (dist <= 1.0) {
-          // 前方：與鏡頭前向的點積需為正，且夠對準（> 0.3）
           const dirToFox = tmpVec.normalize();
           const dot = camForward.dot(dirToFox);
           if (dot > 0.3) { show = true; break; }
@@ -295,9 +146,8 @@
       hintEl.style.display = show ? 'block' : 'none';
     }
 
-    function onXRFrame(time, frame) {
-      // Place foxes once when we have a reference space & camera
-      if (!placed && renderer.xr.isPresenting) {
+    function onFrame(time) {
+      if (!placed) {
         placeFoxesAround(camera);
       }
       updateHintVisibility();
@@ -310,7 +160,15 @@
       setTimeout(()=>{ errorEl.style.display = 'none'; }, 5000);
     }
 
-    init();
+    // 初始化
+    (async () => {
+      await startCamera();
+      await loadFoxBase();
+      renderer.setAnimationLoop(onFrame);
+      window.addEventListener('resize', ()=>{
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+    })();
   </script>
 </body>
 </html>
