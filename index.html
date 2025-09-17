@@ -3,9 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <!-- Some browsers require Permission-Policy via server headers, but keep meta as hint -->
+  <meta http-equiv="Permissions-Policy" content="camera=(self), xr-spatial-tracking=(self)" />
+  <meta name="theme-color" content="#000000" />
   <title>店內 AR 隱藏小狐狸</title>
   <style>
     html, body { margin: 0; padding: 0; height: 100%; background: #000; }
+    #cameraPreview { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; background: #000; }
+    canvas { position: fixed; inset: 0; z-index: 1; }
     #overlay { position: fixed; inset: 0; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; }
     #topbar { margin: env(safe-area-inset-top) 12px 0; padding: 10px 12px; background: rgba(0,0,0,.45); color: #fff; border-radius: 12px; font-family: system-ui, -apple-system, Segoe UI, Roboto, Noto Sans TC, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; backdrop-filter: blur(6px); max-width: calc(100% - 24px); }
     #topbar b { color: #a0e9ff; }
@@ -19,12 +24,15 @@
   </style>
 </head>
 <body>
+  <!-- Fallback camera preview when WebXR AR is unavailable/not active -->
+  <video id="cameraPreview" autoplay playsinline muted></video>
   <div id="overlay">
     <div id="topbar">
       <div><b>玩法：</b>移動在店內（15 公尺範圍）尋找 5 隻隱藏的小狐狸。靠近到 1 公尺且位在鏡頭前方會出現提示。</div>
     </div>
     <div id="foot">
-      <button id="enterARBtn">啟動相機 / 進入 AR</button
+      <button id="enterARBtn">啟動相機 / 進入 AR</button>
+      <div class="chip" id="compatMsg">若按鈕無法使用：請以 HTTPS 網址（或 localhost）在行動裝置的 Chrome/Edge/Safari 開啟</div>
     </div>
       <div class="chip">範例模型：fox_stand.glb / fox_sleep.glb</div>
     </div>
@@ -42,6 +50,9 @@
     import { clone as SkeletonClone } from 'https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/utils/SkeletonUtils.js';
 
     const overlayRoot = document.body;
+    const videoEl = document.getElementById('cameraPreview');
+    const enterBtn = document.getElementById('enterARBtn');
+    const compatMsg = document.getElementById('compatMsg');
     const enterBtn = document.getElementById('enterARBtn');
     const compatMsg = document.getElementById('compatMsg'); // for dom-overlay
     const hintEl = document.getElementById('hint');
@@ -63,17 +74,7 @@
     dir.position.set(1, 2, 1);
     scene.add(dir);
 
-    // Optional: subtle environment for nicer PBR
-    new RGBELoader()
-      .setDataType(THREE.HalfFloatType)
-      .load('https://cdn.jsdelivr.net/gh/pmndrs/drei-assets@master/hdri/venice_sunset_1k.hdr', (hdr) => {
-        const pmrem = new THREE.PMREMGenerator(renderer);
-        pmrem.compileEquirectangularShader();
-        const env = pmrem.fromEquirectangular(hdr).texture;
-        scene.environment = env;
-        hdr.dispose();
-        pmrem.dispose();
-      });
+    //（移除 HDRI 以降低行動裝置載入失敗與黑畫面風險）
 
     const camera = new THREE.PerspectiveCamera();
 
@@ -126,40 +127,54 @@
     let placed = false;
 
     async function init() {
+      if (!window.isSecureContext) {
+        showError('需要以 HTTPS 或 localhost 開啟，否則相機/AR 可能無法使用。');
+      }
+
+      // 先嘗試開啟相機作為「背景預覽」，即使沒有進入 AR 也能看到畫面
       try {
-        await loadFoxBase();
-      } catch (e) {
-        showError(e.message || '模型載入失敗，請確認檔名與路徑。');
-      }
-
-      // Prepare AR button but don't auto-append; we will mount it into our UI
-      let xrButton;
-      const setupARButton = () => {
-        try {
-          xrButton = ARButton.createButton(renderer, {
-            requiredFeatures: ['local-floor'],
-            optionalFeatures: ['dom-overlay','unbounded'],
-            domOverlay: { root: overlayRoot }
-          });
-          // Style & move the button into our footer
-          xrButton.style.display = 'none'; // keep hidden, we proxy via enterBtn
-          document.body.appendChild(xrButton);
-          enterBtn.disabled = false;
-        } catch (err) {
-          showError('建立 AR 按鈕失敗：' + (err?.message || err));
-          enterBtn.disabled = true;
+        if (navigator.mediaDevices?.getUserMedia) {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+          videoEl.srcObject = stream;
+        } else {
+          compatMsg.textContent = '此瀏覽器不支援 navigator.mediaDevices.getUserMedia。';
         }
-      };
-
-      // If WebXR available, set up AR; else fallback to camera permission test only
-      if (navigator.xr) {
-        setupARButton();
-      } else {
-        compatMsg.textContent = '此瀏覽器不支援 WebXR AR，仍可授權相機測試，但無法進入 AR。';
+      } catch (e) {
+        showError('相機預覽開啟失敗：' + (e?.message || e));
       }
 
+      // three.js renderer
       renderer.setAnimationLoop(onXRFrame);
       window.addEventListener('resize', onResize);
+
+      // 建立 WebXR AR 按鈕（隱藏原生，使用自製按鈕轉觸）
+      let xrButton;
+      const setupARButton = () => {
+        xrButton = ARButton.createButton(renderer, {
+          requiredFeatures: ['local-floor'],
+          optionalFeatures: ['dom-overlay','unbounded'],
+          domOverlay: { root: overlayRoot }
+        });
+        xrButton.style.display = 'none';
+        document.body.appendChild(xrButton);
+        enterBtn.disabled = false;
+      };
+
+      if ('xr' in navigator) {
+        setupARButton();
+      } else {
+        compatMsg.textContent = '此瀏覽器不支援 WebXR。將使用相機預覽模式。';
+      }
+
+      // 當 AR session 啟動/結束時，切換相機預覽可見度
+      renderer.xr.addEventListener('sessionstart', () => {
+        videoEl.style.display = 'none';
+        // place foxes at session start to ensure reference is ready
+        if (!placed) placeFoxesAround(camera);
+      });
+      renderer.xr.addEventListener('sessionend', () => {
+        videoEl.style.display = 'block';
+      });
     }
 
       try {
@@ -187,9 +202,25 @@
     enterBtn.addEventListener('click', async () => {
       enterBtn.disabled = true;
       try {
-        // 1) Ask for camera (user gesture required)
+        // 1) 先嘗試相機權限（有些瀏覽器需要手勢觸發）
         if (navigator.mediaDevices?.getUserMedia) {
-          const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+          const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+          // 若已經有預覽在播，可直接停掉這個暫時串流
+          s.getTracks().forEach(t => t.stop());
+        }
+        // 2) 啟動 WebXR AR（若可用）
+        const btn = document.querySelector('button.webxr-ar-button');
+        if (btn) {
+          btn.click();
+        } else if (!('xr' in navigator)) {
+          showError('此瀏覽器不支援 WebXR，已維持相機預覽模式。');
+        }
+      } catch (err) {
+        showError('啟動流程失敗：' + (err?.message || err));
+      } finally {
+        enterBtn.disabled = false;
+      }
+    });
           // Immediately stop tracks; we only needed the permission prompt here.
           stream.getTracks().forEach(t => t.stop());
         }
