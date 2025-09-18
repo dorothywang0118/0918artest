@@ -2,25 +2,24 @@
 <html>
   <head>
     <meta charset="utf-8">
-    <title>找狐狸 AR (最簡版)</title>
+    <title>找狐狸 AR</title>
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
     <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js/aframe/build/aframe-ar.js"></script>
   </head>
   <body style="margin:0; overflow:hidden;">
     <a-scene embedded vr-mode-ui="enabled: false"
              arjs="trackingMethod: best; sourceType: webcam; debugUIEnabled: false">
-      <!-- 必須：先把圖片放到資產區，且是「真正的圖片檔」 -->
+
+      <!-- 🔑 資產區，預先載入圖片 -->
       <a-assets>
-        <img id="foxImg" crossorigin="anonymous"
-             src="https://openclipart.org/download/308495/fox-head-silhouette.svg">
+        <img id="foxImg" src="assets/fox-head-silhouette.png">
       </a-assets>
 
-      <!-- 把圖「掛在 marker 下面」：對準 Hiro 就會出現 -->
+      <!-- 🔑 狐狸圖掛在 marker 上 -->
       <a-marker preset="hiro">
         <a-image src="#foxImg" position="0 0.5 0" scale="0.6 0.6 0.6"></a-image>
       </a-marker>
 
-      <!-- 用 AR.js 的相機 -->
       <a-entity camera></a-entity>
     </a-scene>
   </body>
