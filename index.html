@@ -2,24 +2,31 @@
 <html>
   <head>
     <meta charset="utf-8">
-    <title>找狐狸 AR</title>
+    <title>找皮卡丘 AR</title>
+    <!-- A-Frame -->
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <!-- AR.js for A-Frame -->
     <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js/aframe/build/aframe-ar.js"></script>
   </head>
   <body style="margin:0; overflow:hidden;">
     <a-scene embedded vr-mode-ui="enabled: false"
              arjs="trackingMethod: best; sourceType: webcam; debugUIEnabled: false">
 
-      <!-- 🔑 資產區，預先載入圖片 -->
+      <!-- 預先載入圖片資產 -->
       <a-assets>
-        <img id="foxImg" src="assets/pika.png">
+        <img id="pika" src="assets/pika.png">
       </a-assets>
 
-      <!-- 🔑 狐狸圖掛在 marker 上 -->
+      <!-- 把圖片放在 Hiro 標記上 -->
       <a-marker preset="hiro">
-        <a-image src="#foxImg" position="0 0.5 0" scale="0.6 0.6 0.6"></a-image>
+        <a-image src="#pika"
+                 position="0 0.5 0"
+                 scale="1 1 1"
+                 rotation="0 0 0">
+        </a-image>
       </a-marker>
 
+      <!-- 相機 -->
       <a-entity camera></a-entity>
     </a-scene>
   </body>
