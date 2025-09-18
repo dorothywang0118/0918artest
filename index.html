@@ -1,85 +1,27 @@
 <!DOCTYPE html>
 <html>
-<head>
-  <meta charset="utf-8"/>
-  <title>找狐狸 AR (WebXR Hit-Test)</title>
-  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-  <script>
-    // 簡單的 hit-test 元件
-    AFRAME.registerComponent('hit-test-placer', {
-      init() {
-        const sceneEl = this.el.sceneEl;
-        this.session = null;
-        this.refSpace = null;
-        this.viewerSpace = null;
+  <head>
+    <meta charset="utf-8">
+    <title>找狐狸 AR (最簡版)</title>
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js/aframe/build/aframe-ar.js"></script>
+  </head>
+  <body style="margin:0; overflow:hidden;">
+    <a-scene embedded vr-mode-ui="enabled: false"
+             arjs="trackingMethod: best; sourceType: webcam; debugUIEnabled: false">
+      <!-- 必須：先把圖片放到資產區，且是「真正的圖片檔」 -->
+      <a-assets>
+        <img id="foxImg" crossorigin="anonymous"
+             src="https://openclipart.org/download/308495/fox-head-silhouette.svg">
+      </a-assets>
 
-        sceneEl.addEventListener('enter-vr', async () => {
-          if (sceneEl.is('ar-mode')) {
-            this.session = sceneEl.renderer.xr.getSession();
-            this.refSpace = await this.session.requestReferenceSpace('local');
-            this.viewerSpace = await this.session.requestReferenceSpace('viewer');
-            this.hitTestSource = await this.session.requestHitTestSource({ space: this.viewerSpace });
-          }
-        });
+      <!-- 把圖「掛在 marker 下面」：對準 Hiro 就會出現 -->
+      <a-marker preset="hiro">
+        <a-image src="#foxImg" position="0 0.5 0" scale="0.6 0.6 0.6"></a-image>
+      </a-marker>
 
-        this.reticle = document.createElement('a-ring');
-        this.reticle.setAttribute('radius-inner', '0.045');
-        this.reticle.setAttribute('radius-outer', '0.06');
-        this.reticle.setAttribute('rotation', '-90 0 0');
-        this.reticle.setAttribute('visible', 'false');
-        sceneEl.appendChild(this.reticle);
-
-        sceneEl.renderer.xr.addEventListener('sessionend', () => {
-          this.hitTestSource = null;
-          this.session = null;
-        });
-
-        this.el.addEventListener('click', () => {
-          if (this.reticle.getAttribute('visible')) {
-            const p = this.reticle.object3D.position;
-            this.el.setAttribute('position', `${p.x} ${p.y} ${p.z}`);
-            this.el.setAttribute('visible', 'true');
-          }
-        });
-      },
-      tick(_, frame) {
-        if (!frame || !this.hitTestSource) return;
-        const results = frame.getHitTestResults(this.hitTestSource);
-        if (results.length > 0) {
-          const refSpace = this.refSpace;
-          const pose = results[0].getPose(refSpace);
-          const m = new THREE.Matrix4().fromArray(pose.transform.matrix);
-          const p = new THREE.Vector3().setFromMatrixPosition(m);
-          this.reticle.setAttribute('position', `${p.x} ${p.y} ${p.z}`);
-          this.reticle.setAttribute('visible', 'true');
-        } else {
-          this.reticle.setAttribute('visible', 'false');
-        }
-      }
-    });
-  </script>
-</head>
-<body style="margin:0; overflow:hidden;">
-  <a-scene
-    webxr="mode: ar; optionalFeatures: hit-test, dom-overlay; overlayElement: #overlay"
-    renderer="alpha:true; antialias:true"
-    embedded>
-
-    <a-assets>
-      <img id="foxImg" crossorigin="anonymous"
-           src="https://openclipart.org/download/308495/fox-head-silhouette.svg">
-    </a-assets>
-
-    <a-entity id="fox" geometry="primitive: plane; height: 0.4; width: 0.4"
-              material="src: #foxImg; transparent: true; side: double"
-              hit-test-placer visible="false"></a-entity>
-
-    <a-entity camera></a-entity>
-  </a-scene>
-
-  <div id="overlay" style="position:fixed;left:0;top:0;right:0;padding:12px;">
-    <button onclick="document.querySelector('a-scene').enterVR()">進入 AR</button>
-    <span style="margin-left:8px;">移動手機找地板圓環，點一下放狐狸</span>
-  </div>
-</body>
+      <!-- 用 AR.js 的相機 -->
+      <a-entity camera></a-entity>
+    </a-scene>
+  </body>
 </html>
